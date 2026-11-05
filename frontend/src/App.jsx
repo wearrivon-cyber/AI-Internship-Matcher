@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 
 import api from './api';
+import internships from './data/internships';
 
 function cleanDescription(description = '') {
   return description
@@ -83,7 +84,7 @@ function Layout({ children }) {
         <footer>
           © 2026 Internlytic Technologies
           <span>Built for transparent career discovery</span>
-          <a href="https://github.com/" target="_blank" rel="noreferrer">
+          <a href="https://github.com/wearrivon-cyber/AI-Internship-Matcher" target="_blank" rel="noreferrer">
             GitHub <Github size={14} />
           </a>
         </footer>
@@ -93,13 +94,7 @@ function Layout({ children }) {
 }
 
 function Home() {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    api.get('/api/catalogue')
-      .then(response => setCount(response.data.length))
-      .catch(() => {});
-  }, []);
+  const count = internships.length;
 
   const tracks = [
     { icon: '✳', name: 'Artificial Intelligence', detail: 'Machine learning & intelligent systems' },
@@ -203,7 +198,7 @@ function Home() {
           <div className="stat-icon">▤</div>
           <small>PROGRAMME RECORDS</small>
           <b>{count}</b>
-          <p>Available in your local catalogue</p>
+          <p>Programme previews in this catalogue</p>
         </article>
 
         <article className="stat-card">
@@ -540,16 +535,9 @@ function Profile() {
 }
 
 function Catalogue() {
-  const [programs, setPrograms] = useState([]);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    api.get('/api/catalogue')
-      .then(response => setPrograms(response.data))
-      .catch(() => {});
-  }, []);
-
-  const filtered = programs.filter(program =>
+  const filtered = internships.filter(program =>
     (program.title + ' ' + program.track)
       .toLowerCase()
       .includes(search.toLowerCase())
@@ -559,7 +547,7 @@ function Catalogue() {
     <>
       <h2>Internship catalogue</h2>
       <p className="sub">
-        Browse programme records loaded in this app.
+        Explore programme previews across different career tracks.
       </p>
 
       <input
@@ -573,12 +561,14 @@ function Catalogue() {
         {filtered.map(program => (
           <article className="panel" key={program.id}>
             <small>
-              {program.track} · {program.verified ? 'VERIFIED' : 'PROGRAMME PREVIEW'}
+              {program.track} · PROGRAMME PREVIEW
             </small>
 
             <h3>{program.title}</h3>
             <p>{cleanDescription(program.description)}</p>
-            <p>{program.location} · {program.duration}</p>
+            <p>
+              {program.organization} · {program.location} · {program.duration}
+            </p>
 
             <div>
               {program.required_skills.map(skill => (
@@ -592,6 +582,10 @@ function Catalogue() {
           </article>
         ))}
       </div>
+
+      {filtered.length === 0 && (
+        <p className="notice">No programmes match your search.</p>
+      )}
 
       <p className="notice">
         These are programme previews, not confirmed live vacancies.

@@ -75,7 +75,7 @@ function Layout({ children }) {
           </div>
 
           <span className={online ? 'online' : 'offline'}>
-            ● {online ? 'API connected' : 'API offline'}
+            ● {online ? 'API connected' : 'Frontend Preview'}
           </span>
         </header>
 

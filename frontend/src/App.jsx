@@ -15,10 +15,82 @@ import {
 import api from './api';
 import internships from './data/internships';
 
+const PROFILE_KEY = 'internlytic_student_profile';
+
 function cleanDescription(description = '') {
   return description
     .replace(/application details will be announced soon\.?/gi, '')
     .trim();
+}
+
+function splitValues(value = '') {
+  return value.split(',').map(item => item.trim()).filter(Boolean);
+}
+
+function normalizeSkill(value = '') {
+  const skill = String(value).toLowerCase().replace(/[^a-z0-9+#]/g, '');
+
+  const aliases = {
+    js: 'javascript',
+    javascript: 'javascript',
+    py: 'python',
+    python3: 'python',
+    ml: 'machinelearning',
+    machinelearning: 'machinelearning',
+    dl: 'deeplearning',
+    deeplearning: 'deeplearning',
+    naturalanguageprocessing: 'nlp',
+    reactjs: 'react',
+    html5: 'html',
+    css3: 'css'
+  };
+
+  return aliases[skill] || skill;
+}
+
+function calculateMatches(userSkills, userInterests) {
+  const skillSet = new Set(userSkills.map(normalizeSkill));
+  const interests = userInterests.map(item => item.toLowerCase());
+
+  return internships.map(program => {
+    const required = program.required_skills || [];
+
+    const matched = required.filter(skill =>
+      skillSet.has(normalizeSkill(skill))
+    );
+
+    const missing = required.filter(skill =>
+      !skillSet.has(normalizeSkill(skill))
+    );
+
+    const skillScore = required.length
+      ? (matched.length / required.length) * 80
+      : 0;
+
+    const searchable = [
+      program.title,
+      program.track,
+      program.description
+    ].join(' ').toLowerCase();
+
+    const interestMatches = interests.filter(interest =>
+      searchable.includes(interest)
+    );
+
+    const interestScore = interests.length
+      ? (interestMatches.length / interests.length) * 20
+      : 0;
+
+    return {
+      ...program,
+      match: {
+        score: Math.min(100, Math.round(skillScore + interestScore)),
+        matched_skills: matched,
+        missing_skills: missing,
+        education_eligible: null
+      }
+    };
+  }).sort((a, b) => b.match.score - a.match.score);
 }
 
 function Layout({ children }) {
@@ -84,7 +156,11 @@ function Layout({ children }) {
         <footer>
           © 2026 Internlytic Technologies
           <span>Built for transparent career discovery</span>
-          <a href="https://github.com/wearrivon-cyber/AI-Internship-Matcher" target="_blank" rel="noreferrer">
+          <a
+            href="https://github.com/wearrivon-cyber/AI-Internship-Matcher"
+            target="_blank"
+            rel="noreferrer"
+          >
             GitHub <Github size={14} />
           </a>
         </footer>
@@ -94,8 +170,6 @@ function Layout({ children }) {
 }
 
 function Home() {
-  const count = internships.length;
-
   const tracks = [
     { icon: '✳', name: 'Artificial Intelligence', detail: 'Machine learning & intelligent systems' },
     { icon: '⌘', name: 'Web Development', detail: 'Frontend & backend engineering' },
@@ -121,9 +195,9 @@ function Home() {
           </h2>
 
           <p>
-            Your skills have potential. Let intelligent
-            matching help you discover opportunities,
-            understand your strengths and plan your next step.
+            Your skills have potential. Let intelligent matching help
+            you discover opportunities, understand your strengths and
+            plan your next step.
           </p>
 
           <div className="hero-actions">
@@ -166,7 +240,7 @@ function Home() {
             <div className="mini-ring">78%</div>
             <div>
               <small>PROFILE INSIGHT</small>
-              <b>Strong potential</b>
+              <b>Illustrative score</b>
             </div>
           </div>
 
@@ -197,7 +271,7 @@ function Home() {
         <article className="stat-card">
           <div className="stat-icon">▤</div>
           <small>PROGRAMME RECORDS</small>
-          <b>{count}</b>
+          <b>{internships.length}</b>
           <p>Programme previews in this catalogue</p>
         </article>
 
@@ -226,11 +300,7 @@ function Home() {
 
       <div className="track-grid">
         {tracks.map((track, index) => (
-          <NavLink
-            to="/catalogue"
-            className="track-card"
-            key={track.name}
-          >
+          <NavLink to="/catalogue" className="track-card" key={track.name}>
             <span className="track-number">0{index + 1}</span>
             <span className="track-symbol">{track.icon}</span>
             <h3>{track.name}</h3>
@@ -245,8 +315,8 @@ function Home() {
           <small className="eyebrow">A CLEARER WAY FORWARD</small>
           <h2>From potential to progress.</h2>
           <p>
-            A simple journey designed to help you understand
-            where you stand and what to improve next.
+            A simple journey designed to help you understand where
+            you stand and what to improve next.
           </p>
           <NavLink className="btn" to="/matcher">
             Start your journey <ArrowUpRight size={17} />
@@ -296,72 +366,48 @@ function Matcher() {
   const [skills, setSkills] = useState('Python, HTML, CSS, JavaScript');
   const [interests, setInterests] = useState('frontend, web development');
   const [education, setEducation] = useState('');
-  const [file, setFile] = useState(null);
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
-  async function runMatcher() {
-    setBusy(true);
+  function runMatcher() {
     setError('');
     setItems([]);
+    setHasSearched(false);
 
-    try {
-      let selectedSkills = skills
-        .split(',')
-        .map(x => x.trim())
-        .filter(Boolean);
+    const selectedSkills = splitValues(skills);
+    const selectedInterests = splitValues(interests);
 
-      if (file) {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const parsed = await api.post('/api/parse-cv', formData);
-
-        selectedSkills = [
-          ...new Set([...selectedSkills, ...parsed.data.skills])
-        ];
-
-        setSkills(selectedSkills.join(', '));
-      }
-
-      const response = await api.post('/api/matches', {
-        skills: selectedSkills,
-        interests: interests.split(',').map(x => x.trim()).filter(Boolean),
-        education
-      });
-
-      setItems(response.data.matches || []);
-    } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-        'Unable to generate matches. Please check the backend.'
-      );
-    } finally {
-      setBusy(false);
+    if (!selectedSkills.length) {
+      setError('Please enter at least one skill.');
+      return;
     }
+
+    const results = calculateMatches(selectedSkills, selectedInterests);
+    setItems(results);
+    setHasSearched(true);
   }
 
   return (
     <>
       <h2>Find your best-fit opportunities</h2>
       <p className="sub">
-        Upload a CV or enter skills manually. Your CV is processed temporarily and not saved.
+        Enter your skills and interests to discover programme matches
+        and understand your skill gaps.
       </p>
 
       <div className="columns">
         <div className="panel">
           <h3>Profile inputs</h3>
 
-          <label className="upload">
+          <div className="upload">
             <FileUp />
-            <b>{file ? file.name : 'Choose CV (PDF, DOCX, TXT)'}</b>
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt"
-              onChange={e => setFile(e.target.files[0] || null)}
-            />
-          </label>
+            <b>CV upload — backend feature</b>
+            <p className="sub">
+              CV parsing requires the backend. For this public demo,
+              please enter your skills manually.
+            </p>
+          </div>
 
           <label>
             Skills
@@ -369,6 +415,7 @@ function Matcher() {
               rows="3"
               value={skills}
               onChange={e => setSkills(e.target.value)}
+              placeholder="Python, HTML, CSS, JavaScript"
             />
           </label>
 
@@ -377,6 +424,7 @@ function Matcher() {
             <input
               value={interests}
               onChange={e => setInterests(e.target.value)}
+              placeholder="frontend, web development"
             />
           </label>
 
@@ -389,12 +437,16 @@ function Matcher() {
             />
           </label>
 
-          <button className="btn" disabled={busy} onClick={runMatcher}>
-            {busy ? 'Analysing…' : 'Generate matches'}
-            <Sparkles />
+          <button className="btn" onClick={runMatcher}>
+            Generate matches <Sparkles />
           </button>
 
           {error && <p className="error">{error}</p>}
+
+          <p className="sub">
+            Scoring: 80% skill coverage and 20% interest overlap.
+            Education eligibility is not configured in this catalogue.
+          </p>
         </div>
 
         <div>
@@ -402,15 +454,23 @@ function Matcher() {
             <small>YOUR RESULTS</small>
             <h3>Recommendations, explained.</h3>
             <p className="sub">
-              Scores are based on skill coverage and interest overlap.
+              Higher-scoring programmes appear first.
             </p>
           </div>
 
           {items.length === 0 ? (
             <div className="empty">
               <Sparkles />
-              <h3>Your matches will appear here</h3>
-              <p>Add skills and run the matcher.</p>
+              <h3>
+                {hasSearched
+                  ? 'No programmes available'
+                  : 'Your matches will appear here'}
+              </h3>
+              <p>
+                {hasSearched
+                  ? 'There are no programme records to compare.'
+                  : 'Add skills and run the matcher.'}
+              </p>
             </div>
           ) : (
             items.map(program => (
@@ -420,7 +480,7 @@ function Matcher() {
                     <small>{program.track}</small>
                     <h3>{program.title}</h3>
                     <p>
-                      {program.organization} · {program.work_mode} · {program.duration}
+                      {program.organization} · {program.location} · {program.duration}
                     </p>
                   </div>
 
@@ -440,22 +500,28 @@ function Matcher() {
 
                 <b>Matching skills</b>
                 <div>
-                  {program.match.matched_skills.map(skill => (
-                    <i className="good" key={skill}>{skill}</i>
-                  ))}
+                  {program.match.matched_skills.length ? (
+                    program.match.matched_skills.map(skill => (
+                      <i className="good" key={skill}>{skill}</i>
+                    ))
+                  ) : (
+                    <p className="sub">No required skills matched yet.</p>
+                  )}
                 </div>
 
                 <b>Skills to strengthen</b>
                 <div>
-                  {program.match.missing_skills.map(skill => (
-                    <i className="gap" key={skill}>{skill}</i>
-                  ))}
+                  {program.match.missing_skills.length ? (
+                    program.match.missing_skills.map(skill => (
+                      <i className="gap" key={skill}>{skill}</i>
+                    ))
+                  ) : (
+                    <p className="sub">All listed required skills are covered.</p>
+                  )}
                 </div>
 
                 <p>
-                  Eligibility: {program.match.education_eligible
-                    ? 'Meets stated education rule'
-                    : 'Review education rule'}
+                  Education eligibility: Not assessed in this programme preview.
                 </p>
 
                 <div className="application-status">
@@ -470,35 +536,44 @@ function Matcher() {
   );
 }
 
-function Profile() {
-  const [form, setForm] = useState({
-    name: '',
-    email: '',
-    education: '',
-    experience: '',
-    skills: 'Python, HTML, CSS',
-    interests: 'AI, web development'
-  });
+const defaultProfile = {
+  name: '',
+  email: '',
+  education: '',
+  experience: '',
+  skills: 'Python, HTML, CSS',
+  interests: 'AI, web development'
+};
 
+function loadProfile() {
+  try {
+    const saved = localStorage.getItem(PROFILE_KEY);
+    if (!saved) return { ...defaultProfile };
+
+    const parsed = JSON.parse(saved);
+    return { ...defaultProfile, ...parsed };
+  } catch {
+    return { ...defaultProfile };
+  }
+}
+
+function Profile() {
+  const [form, setForm] = useState(loadProfile);
   const [message, setMessage] = useState('');
 
   function updateField(key, value) {
-    setForm({ ...form, [key]: value });
+    setForm(previous => ({ ...previous, [key]: value }));
+    setMessage('');
   }
 
-  async function saveProfile(e) {
-    e.preventDefault();
+  function saveProfile(event) {
+    event.preventDefault();
 
     try {
-      const response = await api.post('/api/profiles', {
-        ...form,
-        skills: form.skills.split(',').map(x => x.trim()).filter(Boolean),
-        interests: form.interests.split(',').map(x => x.trim()).filter(Boolean)
-      });
-
-      setMessage('Profile saved. ID: ' + response.data.id);
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(form));
+      setMessage('Profile saved successfully in this browser.');
     } catch {
-      setMessage('Backend connection error.');
+      setMessage('Unable to save profile. Please check browser storage settings.');
     }
   }
 
@@ -506,7 +581,8 @@ function Profile() {
     <div className="panel profile">
       <h2>Build your student profile</h2>
       <p className="sub">
-        Save profile data to the local SQLite database.
+        Your profile is saved in this browser on this device.
+        It is not uploaded to a server.
       </p>
 
       <form onSubmit={saveProfile}>
@@ -527,7 +603,7 @@ function Profile() {
           </label>
         ))}
 
-        <button className="btn">Save profile</button>
+        <button className="btn" type="submit">Save profile</button>
         {message && <p>{message}</p>}
       </form>
     </div>
@@ -538,7 +614,7 @@ function Catalogue() {
   const [search, setSearch] = useState('');
 
   const filtered = internships.filter(program =>
-    (program.title + ' ' + program.track)
+    `${program.title} ${program.track}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -560,10 +636,7 @@ function Catalogue() {
       <div className="catalogue">
         {filtered.map(program => (
           <article className="panel" key={program.id}>
-            <small>
-              {program.track} · PROGRAMME PREVIEW
-            </small>
-
+            <small>{program.track} · PROGRAMME PREVIEW</small>
             <h3>{program.title}</h3>
             <p>{cleanDescription(program.description)}</p>
             <p>
@@ -571,7 +644,7 @@ function Catalogue() {
             </p>
 
             <div>
-              {program.required_skills.map(skill => (
+              {(program.required_skills || []).map(skill => (
                 <i className="chip" key={skill}>{skill}</i>
               ))}
             </div>

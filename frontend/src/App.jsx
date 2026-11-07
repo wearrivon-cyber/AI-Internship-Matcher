@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Routes, Route } from 'react-router-dom';
-
 import {
   LayoutDashboard,
   Sparkles,
@@ -14,57 +13,136 @@ import {
 
 import api from './api';
 import internships from './data/internships';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import mammoth from 'mammoth/mammoth.browser';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const PROFILE_KEY = 'internlytic_student_profile';
 
-function cleanDescription(description = '') {
-  return description
+function cleanDescription(value = '') {
+  return value
     .replace(/application details will be announced soon\.?/gi, '')
     .trim();
 }
 
 function splitValues(value = '') {
-  return value.split(',').map(item => item.trim()).filter(Boolean);
+  return value.split(',').map(x => x.trim()).filter(Boolean);
 }
 
 function normalizeSkill(value = '') {
-  const skill = String(value).toLowerCase().replace(/[^a-z0-9+#]/g, '');
+  const key = String(value).toLowerCase().replace(/[^a-z0-9+#]/g, '');
 
   const aliases = {
     js: 'javascript',
-    javascript: 'javascript',
     py: 'python',
     python3: 'python',
     ml: 'machinelearning',
     machinelearning: 'machinelearning',
     dl: 'deeplearning',
     deeplearning: 'deeplearning',
-    naturalanguageprocessing: 'nlp',
     reactjs: 'react',
     html5: 'html',
-    css3: 'css'
+    css3: 'css',
+    naturalanguageprocessing: 'nlp'
   };
 
-  return aliases[skill] || skill;
+  return aliases[key] || key;
 }
 
-function calculateMatches(userSkills, userInterests) {
-  const skillSet = new Set(userSkills.map(normalizeSkill));
-  const interests = userInterests.map(item => item.toLowerCase());
+const EXTRA_SKILLS = [
+  'Python', 'Java', 'JavaScript', 'TypeScript', 'C++', 'C#',
+  'HTML', 'CSS', 'React', 'Node.js', 'FastAPI', 'Django',
+  'Flask', 'SQL', 'MongoDB', 'MySQL', 'PostgreSQL',
+  'Machine Learning', 'Deep Learning', 'NLP', 'Data Analysis',
+  'Data Science', 'Excel', 'Power BI', 'TensorFlow', 'PyTorch',
+  'Pandas', 'NumPy', 'Artificial Intelligence', 'Neural Networks',
+  'Figma', 'Wireframing', 'UI Design', 'UX Design',
+  'Networking', 'Cybersecurity', 'Security Fundamentals',
+  'Git', 'GitHub', 'REST API', 'Communication',
+  'Problem Solving', 'Teamwork'
+];
+
+function extractSkills(text) {
+  const vocabulary = [
+    ...new Set([
+      ...EXTRA_SKILLS,
+      ...internships.flatMap(p => p.required_skills || [])
+    ])
+  ];
+
+  const found = [];
+
+  for (const skill of vocabulary) {
+    const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(
+      `(^|[^a-z0-9])${escaped.toLowerCase()}([^a-z0-9]|$)`,
+      'i'
+    );
+
+    if (
+      regex.test(text.toLowerCase()) &&
+      !found.some(x => normalizeSkill(x) === normalizeSkill(skill))
+    ) {
+      found.push(skill);
+    }
+  }
+
+  return found;
+}
+
+async function readCV(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const buffer = await file.arrayBuffer();
+
+  if (ext === 'pdf') {
+    const pdf = await pdfjsLib.getDocument({
+      data: new Uint8Array(buffer)
+    }).promise;
+
+    let text = '';
+
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const content = await page.getTextContent();
+
+      text += content.items
+        .map(item => item.str || '')
+        .join(' ') + ' ';
+    }
+
+    return text;
+  }
+
+  if (ext === 'docx') {
+    const result = await mammoth.extractRawText({
+      arrayBuffer: buffer
+    });
+
+    return result.value;
+  }
+
+  throw new Error('Please choose a PDF or DOCX file.');
+}
+
+function calculateMatches(skills, interests) {
+  const skillSet = new Set(skills.map(normalizeSkill));
+  const interestList = interests.map(x => x.toLowerCase());
 
   return internships.map(program => {
     const required = program.required_skills || [];
 
-    const matched = required.filter(skill =>
-      skillSet.has(normalizeSkill(skill))
+    const matched = required.filter(
+      x => skillSet.has(normalizeSkill(x))
     );
 
-    const missing = required.filter(skill =>
-      !skillSet.has(normalizeSkill(skill))
+    const missing = required.filter(
+      x => !skillSet.has(normalizeSkill(x))
     );
 
     const skillScore = required.length
-      ? (matched.length / required.length) * 80
+      ? matched.length / required.length * 80
       : 0;
 
     const searchable = [
@@ -73,18 +151,21 @@ function calculateMatches(userSkills, userInterests) {
       program.description
     ].join(' ').toLowerCase();
 
-    const interestMatches = interests.filter(interest =>
-      searchable.includes(interest)
+    const interestMatches = interestList.filter(
+      x => searchable.includes(x)
     );
 
-    const interestScore = interests.length
-      ? (interestMatches.length / interests.length) * 20
+    const interestScore = interestList.length
+      ? interestMatches.length / interestList.length * 20
       : 0;
 
     return {
       ...program,
       match: {
-        score: Math.min(100, Math.round(skillScore + interestScore)),
+        score: Math.min(
+          100,
+          Math.round(skillScore + interestScore)
+        ),
         matched_skills: matched,
         missing_skills: missing,
         education_eligible: null
@@ -171,12 +252,12 @@ function Layout({ children }) {
 
 function Home() {
   const tracks = [
-    { icon: '✳', name: 'Artificial Intelligence', detail: 'Machine learning & intelligent systems' },
-    { icon: '⌘', name: 'Web Development', detail: 'Frontend & backend engineering' },
-    { icon: '▥', name: 'Data & Analytics', detail: 'Insights, Python & visualisation' },
-    { icon: '◇', name: 'UI / UX Design', detail: 'Design thinking & user experience' },
-    { icon: '⌁', name: 'Cybersecurity', detail: 'Security & digital protection' },
-    { icon: '✧', name: 'Deep Learning & NLP', detail: 'Advanced AI technologies' }
+    ['✳', 'Artificial Intelligence', 'Machine learning & intelligent systems'],
+    ['⌘', 'Web Development', 'Frontend & backend engineering'],
+    ['▥', 'Data & Analytics', 'Insights, Python & visualisation'],
+    ['◇', 'UI / UX Design', 'Design thinking & user experience'],
+    ['⌁', 'Cybersecurity', 'Security & digital protection'],
+    ['✧', 'Deep Learning & NLP', 'Advanced AI technologies']
   ];
 
   return (
@@ -299,12 +380,16 @@ function Home() {
       </div>
 
       <div className="track-grid">
-        {tracks.map((track, index) => (
-          <NavLink to="/catalogue" className="track-card" key={track.name}>
+        {tracks.map(([icon, name, detail], index) => (
+          <NavLink
+            to="/catalogue"
+            className="track-card"
+            key={name}
+          >
             <span className="track-number">0{index + 1}</span>
-            <span className="track-symbol">{track.icon}</span>
-            <h3>{track.name}</h3>
-            <p>{track.detail}</p>
+            <span className="track-symbol">{icon}</span>
+            <h3>{name}</h3>
+            <p>{detail}</p>
             <span className="track-arrow">↗</span>
           </NavLink>
         ))}
@@ -366,48 +451,109 @@ function Matcher() {
   const [skills, setSkills] = useState('Python, HTML, CSS, JavaScript');
   const [interests, setInterests] = useState('frontend, web development');
   const [education, setEducation] = useState('');
+  const [fileName, setFileName] = useState('');
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function handleCVUpload(file) {
+    setError('');
+    setStatus('');
+    setItems([]);
+
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (!['pdf', 'docx'].includes(ext)) {
+      setError('Please choose a PDF or DOCX CV file.');
+      return;
+    }
+
+    setFileName(file.name);
+    setBusy(true);
+    setStatus('Reading your CV and extracting skills...');
+
+    try {
+      const text = await readCV(file);
+
+      if (!text.trim()) {
+        throw new Error(
+          'No readable text found. Scanned PDFs may need manual skill entry.'
+        );
+      }
+
+      const extracted = extractSkills(text);
+
+      if (!extracted.length) {
+        setStatus(
+          'CV read, but no recognised skills were found. Please add skills manually.'
+        );
+      } else {
+        const combined = [...splitValues(skills), ...extracted];
+
+        const unique = [
+          ...new Map(
+            combined.map(x => [normalizeSkill(x), x])
+          ).values()
+        ];
+
+        setSkills(unique.join(', '));
+        setStatus(`${extracted.length} skills extracted. Review them below.`);
+      }
+    } catch (err) {
+      setError(err.message || 'Unable to read this CV. Please try another file.');
+      setStatus('');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function runMatcher() {
     setError('');
     setItems([]);
-    setHasSearched(false);
 
-    const selectedSkills = splitValues(skills);
-    const selectedInterests = splitValues(interests);
+    const selected = splitValues(skills);
 
-    if (!selectedSkills.length) {
+    if (!selected.length) {
       setError('Please enter at least one skill.');
       return;
     }
 
-    const results = calculateMatches(selectedSkills, selectedInterests);
-    setItems(results);
-    setHasSearched(true);
+    setItems(calculateMatches(selected, splitValues(interests)));
   }
 
   return (
     <>
       <h2>Find your best-fit opportunities</h2>
       <p className="sub">
-        Enter your skills and interests to discover programme matches
-        and understand your skill gaps.
+        Upload your CV or enter your skills manually to discover programme
+        matches and understand your skill gaps.
       </p>
 
       <div className="columns">
         <div className="panel">
           <h3>Profile inputs</h3>
 
-          <div className="upload">
+          <label className="upload">
             <FileUp />
-            <b>CV upload — backend feature</b>
+            <b>{fileName || 'Choose CV (PDF or DOCX)'}</b>
             <p className="sub">
-              CV parsing requires the backend. For this public demo,
-              please enter your skills manually.
+              Your CV is read locally in this browser. It is not uploaded
+              to a server.
             </p>
-          </div>
+            <input
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={e => handleCVUpload(e.target.files?.[0])}
+              disabled={busy}
+            />
+          </label>
+
+          {busy && <p className="sub">{status}</p>}
+          {!busy && status && <p className="success">{status}</p>}
+          {error && <p className="error">{error}</p>}
 
           <label>
             Skills
@@ -437,11 +583,9 @@ function Matcher() {
             />
           </label>
 
-          <button className="btn" onClick={runMatcher}>
-            Generate matches <Sparkles />
+          <button className="btn" onClick={runMatcher} disabled={busy}>
+            {busy ? 'Reading CV...' : 'Generate matches'} <Sparkles />
           </button>
-
-          {error && <p className="error">{error}</p>}
 
           <p className="sub">
             Scoring: 80% skill coverage and 20% interest overlap.
@@ -453,24 +597,14 @@ function Matcher() {
           <div className="panel">
             <small>YOUR RESULTS</small>
             <h3>Recommendations, explained.</h3>
-            <p className="sub">
-              Higher-scoring programmes appear first.
-            </p>
+            <p className="sub">Higher-scoring programmes appear first.</p>
           </div>
 
           {items.length === 0 ? (
             <div className="empty">
               <Sparkles />
-              <h3>
-                {hasSearched
-                  ? 'No programmes available'
-                  : 'Your matches will appear here'}
-              </h3>
-              <p>
-                {hasSearched
-                  ? 'There are no programme records to compare.'
-                  : 'Add skills and run the matcher.'}
-              </p>
+              <h3>Your matches will appear here</h3>
+              <p>Add skills or upload your CV, then generate matches.</p>
             </div>
           ) : (
             items.map(program => (
@@ -500,24 +634,20 @@ function Matcher() {
 
                 <b>Matching skills</b>
                 <div>
-                  {program.match.matched_skills.length ? (
-                    program.match.matched_skills.map(skill => (
-                      <i className="good" key={skill}>{skill}</i>
-                    ))
-                  ) : (
-                    <p className="sub">No required skills matched yet.</p>
-                  )}
+                  {program.match.matched_skills.length
+                    ? program.match.matched_skills.map(skill => (
+                        <i className="good" key={skill}>{skill}</i>
+                      ))
+                    : <p className="sub">No required skills matched yet.</p>}
                 </div>
 
                 <b>Skills to strengthen</b>
                 <div>
-                  {program.match.missing_skills.length ? (
-                    program.match.missing_skills.map(skill => (
-                      <i className="gap" key={skill}>{skill}</i>
-                    ))
-                  ) : (
-                    <p className="sub">All listed required skills are covered.</p>
-                  )}
+                  {program.match.missing_skills.length
+                    ? program.match.missing_skills.map(skill => (
+                        <i className="gap" key={skill}>{skill}</i>
+                      ))
+                    : <p className="sub">All listed required skills are covered.</p>}
                 </div>
 
                 <p>
@@ -548,10 +678,9 @@ const defaultProfile = {
 function loadProfile() {
   try {
     const saved = localStorage.getItem(PROFILE_KEY);
-    if (!saved) return { ...defaultProfile };
-
-    const parsed = JSON.parse(saved);
-    return { ...defaultProfile, ...parsed };
+    return saved
+      ? { ...defaultProfile, ...JSON.parse(saved) }
+      : { ...defaultProfile };
   } catch {
     return { ...defaultProfile };
   }
@@ -566,8 +695,8 @@ function Profile() {
     setMessage('');
   }
 
-  function saveProfile(event) {
-    event.preventDefault();
+  function saveProfile(e) {
+    e.preventDefault();
 
     try {
       localStorage.setItem(PROFILE_KEY, JSON.stringify(form));
@@ -590,8 +719,7 @@ function Profile() {
           ['name', 'Full name'],
           ['email', 'Email'],
           ['education', 'Education'],
-          ['experience', 'Experience / projects'],
-          ['skills', 'Skills (comma separated)'],
+          ['experience', 'Experience / projects'],['skills', 'Skills (comma separated)'],
           ['interests', 'Interests (comma separated)']
         ].map(([key, label]) => (
           <label key={key}>
@@ -603,7 +731,10 @@ function Profile() {
           </label>
         ))}
 
-        <button className="btn" type="submit">Save profile</button>
+        <button className="btn" type="submit">
+          Save profile
+        </button>
+
         {message && <p>{message}</p>}
       </form>
     </div>
